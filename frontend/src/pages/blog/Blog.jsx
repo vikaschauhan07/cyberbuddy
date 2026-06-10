@@ -1,9 +1,8 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { useSelector } from 'react-redux'
 import PageLayout, { PageHero } from '../../components/layout/PageLayout'
-import { BLOG_POSTS, CATEGORY_META } from '../../data/blogPosts'
-import { selectUserPosts } from '../../store/blogSlice'
+import { CATEGORY_META } from '../../data/blogPosts'
+import { fetchBlogPosts } from '../../api/blog'
 import './blog.css'
 
 const SORT_OPTIONS = [
@@ -29,8 +28,31 @@ export default function Blog() {
   const [search, setSearch] = useState('')
   const [sort, setSort] = useState('newest')
 
-  const userPosts = useSelector(selectUserPosts)
-  const allPosts = useMemo(() => [...userPosts, ...BLOG_POSTS], [userPosts])
+  const [posts, setPosts] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState('')
+
+  useEffect(() => {
+    let cancelled = false
+    fetchBlogPosts()
+      .then((data) => {
+        if (!cancelled) setPosts(data)
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setPosts([])
+          setLoadError(err.message || 'Failed to load blog posts')
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const allPosts = posts
 
   const counts = useMemo(() => {
     return allPosts.reduce(
@@ -196,7 +218,22 @@ export default function Blog() {
           </div>
 
           <div className="blog-scroll">
-            {filtered.length === 0 ? (
+            {loading ? (
+              <div className="empty-state">
+                <div className="es-icon" aria-hidden>⏳</div>
+                <h3>Loading articles…</h3>
+              </div>
+            ) : loadError ? (
+              <div className="empty-state">
+                <div className="es-icon" aria-hidden>⚠️</div>
+                <h3>Could not load posts</h3>
+                <p>{loadError}</p>
+                <p style={{ marginTop: 8, fontSize: '0.9rem' }}>
+                  Make sure the backend is running and catalog posts are seeded with{' '}
+                  <code>npm run db:seed-blogs</code> in the backend folder.
+                </p>
+              </div>
+            ) : filtered.length === 0 ? (
               <div className="empty-state">
                 <div className="es-icon" aria-hidden>📭</div>
                 <h3>No posts found</h3>

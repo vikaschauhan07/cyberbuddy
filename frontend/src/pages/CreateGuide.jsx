@@ -1,9 +1,8 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { useDispatch, useSelector } from 'react-redux'
 import PageLayout, { PageHero } from '../components/layout/PageLayout'
-import { addGuide, selectUserGuides } from '../store/guidesSlice'
-import { GUIDES, LEVEL_META } from '../data/guides'
+import { LEVEL_META } from '../data/guides'
+import { createGuide, fetchGuides } from '../api/guide'
 import './blog/blog.css'
 import './create-guide.css'
 
@@ -65,9 +64,7 @@ function emptyStep() {
 /* =============================================================== */
 
 export default function CreateGuide() {
-  const dispatch = useDispatch()
   const navigate = useNavigate()
-  const userGuides = useSelector(selectUserGuides)
 
   /* ─── metadata ─── */
   const [title, setTitle]       = useState('')
@@ -89,13 +86,30 @@ export default function CreateGuide() {
 
   /* ─── ui ─── */
   const [error, setError] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const [existingSlugs, setExistingSlugs] = useState([])
   const [expandedStep, setExpandedStep] = useState(0)
+
+  useEffect(() => {
+    let cancelled = false
+    fetchGuides()
+      .then((guides) => {
+        if (!cancelled) {
+          setExistingSlugs(Array.isArray(guides) ? guides.map((g) => g.slug) : [])
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setExistingSlugs([])
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   const slug = useMemo(() => slugify(title), [title])
   const slugTaken = useMemo(() => {
-    const all = [...userGuides.map((g) => g.slug), ...GUIDES.map((g) => g.slug)]
-    return slug && all.includes(slug)
-  }, [slug, userGuides])
+    return slug && existingSlugs.includes(slug)
+  }, [slug, existingSlugs])
 
   /* ───────── learnings / prereqs ───────── */
   function updateList(list, setter, idx, value) {
@@ -206,7 +220,7 @@ export default function CreateGuide() {
   }
 
   /* ───────── submit ───────── */
-  function handleSubmit(e) {
+  async function handleSubmit(e) {
     e.preventDefault()
     setError('')
 
@@ -269,6 +283,7 @@ export default function CreateGuide() {
       desc: desc.trim(),
       meta: `${minutes} min · ${levelMeta.label}`,
       readTime: minutes,
+      publishedAt: new Date().toISOString().slice(0, 10),
       author: { name: authorName.trim() || 'Anonymous', role: authorRole.trim() || 'Contributor' },
       learnings: cleanLearnings,
       prerequisites: cleanPrereqs,
@@ -276,8 +291,15 @@ export default function CreateGuide() {
       relatedSlugs: [],
     }
 
-    dispatch(addGuide(guide))
-    navigate(`/guides/${guide.slug}`)
+    setSubmitting(true)
+    try {
+      const saved = await createGuide(guide)
+      navigate(`/guides/${saved.slug}`, { replace: true })
+    } catch (err) {
+      setError(err.message || 'Failed to save the guide. Is the backend running?')
+    } finally {
+      setSubmitting(false)
+    }
   }
 
   const totalBlocks = steps.reduce((sum, st) => sum + (st.blocks?.length || 0), 0)
@@ -287,7 +309,7 @@ export default function CreateGuide() {
       <PageHero
         badge="Author"
         title="Create a New Guide"
-        subtitle="Share a step-by-step security guide with the community. Your guide is saved locally (Redux + localStorage) and immediately appears in the Guides listing."
+        subtitle="Share a step-by-step security guide with the community. Your guide is saved to the backend API and appears in the Guides listing."
       />
 
       <main className="page-body" style={{ maxWidth: 1080 }}>
@@ -632,9 +654,9 @@ export default function CreateGuide() {
             <button
               type="submit"
               className="btn-submit"
-              disabled={slugTaken || !title.trim() || !desc.trim() || !tag.trim()}
+              disabled={submitting || slugTaken || !title.trim() || !desc.trim() || !tag.trim()}
             >
-              Publish Guide
+              {submitting ? 'Publishing…' : 'Publish Guide'}
             </button>
           </div>
         </form>

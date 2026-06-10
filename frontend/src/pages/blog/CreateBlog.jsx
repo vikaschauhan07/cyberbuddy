@@ -1,9 +1,8 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { useDispatch, useSelector } from 'react-redux'
 import PageLayout, { PageHero } from '../../components/layout/PageLayout'
-import { addPost, selectUserPosts } from '../../store/blogSlice'
-import { BLOG_POSTS, CATEGORY_META } from '../../data/blogPosts'
+import { CATEGORY_META } from '../../data/blogPosts'
+import { createBlogPost, fetchBlogPosts } from '../../api/blog'
 import './blog.css'
 
 function slugify(text) {
@@ -61,9 +60,7 @@ function defaultBlock(type) {
 }
 
 export default function CreateBlog() {
-  const dispatch = useDispatch()
   const navigate = useNavigate()
-  const userPosts = useSelector(selectUserPosts)
 
   const [title, setTitle] = useState('')
   const [excerpt, setExcerpt] = useState('')
@@ -78,12 +75,29 @@ export default function CreateBlog() {
     { type: 'p', text: '' },
   ])
   const [error, setError] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const [existingSlugs, setExistingSlugs] = useState([])
+
+  useEffect(() => {
+    let cancelled = false
+    fetchBlogPosts()
+      .then((posts) => {
+        if (!cancelled) {
+          setExistingSlugs(Array.isArray(posts) ? posts.map((p) => p.slug) : [])
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setExistingSlugs([])
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   const slug = useMemo(() => slugify(title), [title])
   const slugTaken = useMemo(() => {
-    const all = [...userPosts.map((p) => p.slug), ...BLOG_POSTS.map((p) => p.slug)]
-    return slug && all.includes(slug)
-  }, [slug, userPosts])
+    return slug && existingSlugs.includes(slug)
+  }, [slug, existingSlugs])
 
   function authorInitials() {
     const parts = authorName.trim().split(/\s+/).filter(Boolean)
@@ -137,7 +151,7 @@ export default function CreateBlog() {
   }
 
   /* ---------- SUBMIT ---------- */
-  function handleSubmit(e) {
+  async function handleSubmit(e) {
     e.preventDefault()
     setError('')
 
@@ -191,8 +205,15 @@ export default function CreateBlog() {
       body: cleanBlocks,
     }
 
-    dispatch(addPost(post))
-    navigate(`/blog/${post.slug}`)
+    setSubmitting(true)
+    try {
+      const saved = await createBlogPost(post)
+      navigate(`/blog/${saved.slug}`, { replace: true })
+    } catch (err) {
+      setError(err.message || 'Failed to save the blog post. Is the backend running?')
+    } finally {
+      setSubmitting(false)
+    }
   }
 
   return (
@@ -200,7 +221,7 @@ export default function CreateBlog() {
       <PageHero
         badge="Write"
         title="Create a New Post"
-        subtitle="Add a new article to the CyberSafe blog. Your post is saved locally (Redux + localStorage) and immediately appears in the blog listing."
+        subtitle="Add a new article to the CyberSafe blog. Your post is saved to the backend API and appears in the blog listing."
       />
 
       <main className="page-body" style={{ maxWidth: 1080 }}>
@@ -486,8 +507,8 @@ export default function CreateBlog() {
 
           <div className="create-actions">
             <Link to="/blog" className="btn-secondary">Cancel</Link>
-            <button type="submit" className="btn-submit" disabled={slugTaken || !title.trim() || !excerpt.trim()}>
-              Publish Post
+            <button type="submit" className="btn-submit" disabled={submitting || slugTaken || !title.trim() || !excerpt.trim()}>
+              {submitting ? 'Publishing…' : 'Publish Post'}
             </button>
           </div>
         </form>

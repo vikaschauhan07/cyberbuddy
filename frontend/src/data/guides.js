@@ -824,14 +824,20 @@ export const GUIDES = [
 ]
 
 /* helpers */
-export function getGuideBySlug(slug) {
-  return GUIDES.find((g) => g.slug === slug)
+export function getGuideBySlug(slug, guides = GUIDES) {
+  return guides.find((g) => g.slug === slug)
 }
 
-export function getRelatedGuides(slug) {
-  const g = getGuideBySlug(slug)
-  if (!g) return []
-  return (g.relatedSlugs || [])
-    .map(getGuideBySlug)
-    .filter(Boolean)
+export function getRelatedGuides(guide, allGuides = GUIDES) {
+  if (!guide) return []
+
+  if (guide.relatedSlugs?.length) {
+    return guide.relatedSlugs
+      .map((slug) => allGuides.find((g) => g.slug === slug))
+      .filter(Boolean)
+  }
+
+  return allGuides
+    .filter((g) => g.slug !== guide.slug && g.level === guide.level)
+    .slice(0, 3)
 }

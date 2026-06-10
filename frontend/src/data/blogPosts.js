@@ -500,8 +500,8 @@ export function getPostBySlug(slug) {
   return BLOG_POSTS.find((p) => p.slug === slug)
 }
 
-export function getRelatedPosts(post, limit = 3) {
-  return BLOG_POSTS.filter(
+export function getRelatedPosts(post, posts, limit = 3) {
+  return posts.filter(
     (p) => p.slug !== post.slug && p.category === post.category,
   ).slice(0, limit)
 }

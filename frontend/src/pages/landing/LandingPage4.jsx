@@ -1,7 +1,9 @@
-import { useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { CyberSafeLogo } from '../../components/landing/CyberSafeLogo'
 import SiteNav from '../../components/layout/SiteNav'
+import { fetchBlogPosts } from '../../api/blog'
+import { CATEGORY_META } from '../../data/blogPosts'
 import './cybershield.css'
 
 const LANDING_NAV_LINKS = [
@@ -110,29 +112,152 @@ function ScoreCard() {
   )
 }
 
-function BlogCard({ imgClass, imgStyle, emoji, badge, badgeClass, difficulty, title, desc, meta, readMoreClass }) {
+const LANDING_BLOG_TABS = ['everyone', 'dev', 'biz']
+
+const DIFFICULTY_META = {
+  beginner: { className: 'beginner', label: '✅ Beginner' },
+  intermediate: { className: 'intermediate', label: '⚡ Intermediate' },
+  advanced: { className: 'advanced', label: '🔥 Advanced' },
+}
+
+function BlogCard({ post }) {
+  const cat = CATEGORY_META[post.category]
+  const badge = post.category === 'everyone' ? cat.label : cat.short
+  const readMoreClass = post.category === 'dev' ? 'dev' : post.category === 'biz' ? 'biz' : ''
+  const difficulty = post.difficulty ? DIFFICULTY_META[post.difficulty] : undefined
+  const imgClass = post.cover?.class || 'user'
+  const emoji = post.cover?.emoji || '📝'
+  const meta = `${post.date} · ${post.readTime}`
+
   return (
-    <div className="blog-card">
+    <Link to={`/blog/${post.slug}`} className="blog-card">
       <div className="blog-img">
-        <div className={`blog-img-bg ${imgClass}`} style={imgStyle}>{emoji}</div>
-        <span className={`blog-badge ${badgeClass}`}>{badge}</span>
+        <div className={`blog-img-bg ${imgClass}`}>{emoji}</div>
+        <span className={`blog-badge ${post.category}`}>{badge}</span>
       </div>
       <div className="blog-body">
-        {difficulty && <span className={`blog-difficulty ${difficulty.className}`}>{difficulty.label}</span>}
-        <div className="blog-title">{title}</div>
-        <div className="blog-desc">{desc}</div>
+        {difficulty && (
+          <span className={`blog-difficulty ${difficulty.className}`}>{difficulty.label}</span>
+        )}
+        <div className="blog-title">{post.title}</div>
+        <div className="blog-desc">{post.excerpt}</div>
         <div className="blog-meta">
           <span>{meta}</span>
-          <span className={`blog-read-more ${readMoreClass || ''}`.trim()}>Read More →</span>
+          <span className={`blog-read-more ${readMoreClass}`.trim()}>Read More →</span>
         </div>
       </div>
-    </div>
+    </Link>
+  )
+}
+
+function LandingBlogSection() {
+  const [activeTab, setActiveTab] = useState('everyone')
+  const [posts, setPosts] = useState([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    let cancelled = false
+    fetchBlogPosts()
+      .then((data) => {
+        if (!cancelled) setPosts(data)
+      })
+      .catch(() => {
+        if (!cancelled) setPosts([])
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const counts = useMemo(() => {
+    return posts.reduce(
+      (acc, post) => {
+        acc[post.category] = (acc[post.category] || 0) + 1
+        return acc
+      },
+      { everyone: 0, dev: 0, biz: 0 },
+    )
+  }, [posts])
+
+  const postsByCategory = useMemo(() => {
+    return LANDING_BLOG_TABS.reduce((acc, id) => {
+      acc[id] = posts.filter((p) => p.category === id)
+      return acc
+    }, {})
+  }, [posts])
+
+  return (
+    <section id="blog" className="blog">
+      <div className="blog-header">
+        <div className="blog-header-left">
+          <h2>Latest Insights & Security Tips</h2>
+          <p>Guides and deep-dives for everyone — from everyday users to developers.</p>
+        </div>
+        <Link to="/blog" className="btn-view-all">View All Blogs</Link>
+      </div>
+
+      <div className="blog-tabs">
+        {LANDING_BLOG_TABS.map((id) => {
+          const cat = CATEGORY_META[id]
+          const tabClass = id === 'dev' ? 'dev-tab' : id === 'biz' ? 'biz-tab' : ''
+          return (
+            <button
+              type="button"
+              key={id}
+              className={`blog-tab ${tabClass} ${activeTab === id ? 'active' : ''}`}
+              onClick={() => setActiveTab(id)}
+            >
+              <span className="tab-icon">{cat.icon}</span> {cat.label}{' '}
+              <span className="tab-count">{counts[id] || 0}</span>
+            </button>
+          )
+        })}
+      </div>
+
+      {loading ? (
+        <p style={{ color: 'var(--muted)', padding: '24px 0' }}>Loading latest articles…</p>
+      ) : (
+        LANDING_BLOG_TABS.map((id) => {
+          const categoryPosts = postsByCategory[id] || []
+          const firstRow = categoryPosts.slice(0, 4)
+          const secondRow = categoryPosts.slice(4)
+
+          return (
+            <div
+              key={id}
+              className={`blog-panel ${activeTab === id ? 'active' : ''}`}
+              id={`panel-${id}`}
+            >
+              {categoryPosts.length === 0 ? (
+                <p style={{ color: 'var(--muted)', padding: '16px 0' }}>No articles in this category yet.</p>
+              ) : (
+                <>
+                  <div className="blog-grid">
+                    {firstRow.map((post) => (
+                      <BlogCard key={post.slug} post={post} />
+                    ))}
+                  </div>
+                  {secondRow.length > 0 && (
+                    <div className="blog-grid second-row">
+                      {secondRow.map((post) => (
+                        <BlogCard key={post.slug} post={post} />
+                      ))}
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          )
+        })
+      )}
+    </section>
   )
 }
 
 export default function LandingPage4() {
-  const [activeTab, setActiveTab] = useState('everyone')
-
   return (
     <div className="cs-home">
       <SiteNav links={LANDING_NAV_LINKS} activePath="#top" />
@@ -358,69 +483,7 @@ export default function LandingPage4() {
         </div>
       </section>
 
-      <section id="blog" className="blog">
-        <div className="blog-header">
-          <div className="blog-header-left">
-            <h2>Latest Insights & Security Tips</h2>
-            <p>Guides and deep-dives for everyone — from everyday users to developers.</p>
-          </div>
-          <button type="button" className="btn-view-all">View All Blogs</button>
-        </div>
-
-        <div className="blog-tabs">
-          <button
-            type="button"
-            className={`blog-tab ${activeTab === 'everyone' ? 'active' : ''}`}
-            onClick={() => setActiveTab('everyone')}
-          >
-            <span className="tab-icon">🛡️</span> For Everyone <span className="tab-count">13</span>
-          </button>
-          <button
-            type="button"
-            className={`blog-tab dev-tab ${activeTab === 'dev' ? 'active' : ''}`}
-            onClick={() => setActiveTab('dev')}
-          >
-            <span className="tab-icon">👨‍💻</span> For Developers <span className="tab-count">8</span>
-          </button>
-          <button
-            type="button"
-            className={`blog-tab biz-tab ${activeTab === 'biz' ? 'active' : ''}`}
-            onClick={() => setActiveTab('biz')}
-          >
-            <span className="tab-icon">🏢</span> For Businesses <span className="tab-count">6</span>
-          </button>
-        </div>
-
-        <div className={`blog-panel ${activeTab === 'everyone' ? 'active' : ''}`} id="panel-everyone">
-          <div className="blog-grid">
-            <BlogCard imgClass="p1" emoji="💻" badge="For Everyone" badgeClass="everyone" title="Is Your Email Already Leaked?" desc="Learn how to check if your email has been exposed in known data breaches, which services were affected, and the exact steps to take next to secure your accounts before criminals exploit the leak." meta="May 15, 2026 · 5 min read" />
-            <BlogCard imgClass="p2" emoji="🔒" badge="For Everyone" badgeClass="everyone" title="Top 5 Password Mistakes People Make" desc="Avoid these common password mistakes that make your accounts easy targets for hackers — from reuse and short passphrases to predictable patterns — plus practical fixes you can apply in under five minutes." meta="May 10, 2026 · 4 min read" />
-            <BlogCard imgClass="p3" emoji="🎣" badge="For Everyone" badgeClass="everyone" title="How to Identify a Phishing Link" desc="Spot fake links and spoofed websites in seconds before you click. We walk through real-world examples, red flags in URLs and senders, and simple habits that stop phishing attacks cold." meta="May 5, 2026 · 6 min read" />
-            <BlogCard imgClass="p4" emoji="📱" badge="For Everyone" badgeClass="everyone" title="5 Signs Your Phone May Be Compromised" desc="Unusual battery drain, mystery apps, and strange pop-ups can mean malware or spyware. Discover the warning signs, how to verify your device health, and what to do immediately if something looks wrong." meta="Apr 28, 2026 · 5 min read" />
-          </div>
-        </div>
-
-        <div className={`blog-panel ${activeTab === 'dev' ? 'active' : ''}`} id="panel-dev">
-          <div className="blog-grid">
-            <BlogCard imgClass="d1" emoji="🔑" badge="Developer" badgeClass="dev" difficulty={{ className: 'intermediate', label: '⚡ Intermediate' }} title="How to Store Passwords Securely — Never Plain Text" desc="bcrypt, Argon2, salting explained with real code examples. The right way to handle user credentials in your app." meta="May 20, 2026 · 7 min read" readMoreClass="dev" />
-            <BlogCard imgClass="d2" emoji="🔌" badge="Developer" badgeClass="dev" difficulty={{ className: 'advanced', label: '🔥 Advanced' }} title="Top 10 API Security Mistakes Developers Make" desc="From broken auth to mass assignment — real vulnerabilities found in production APIs and how to fix them." meta="May 16, 2026 · 9 min read" readMoreClass="dev" />
-            <BlogCard imgClass="d3" emoji="💉" badge="Developer" badgeClass="dev" difficulty={{ className: 'beginner', label: '✅ Beginner' }} title="SQL Injection — How It Works & How to Prevent It" desc="A hands-on breakdown of SQL injection with live examples and parameterized query solutions in Python, Node & PHP." meta="May 12, 2026 · 8 min read" readMoreClass="dev" />
-            <BlogCard imgClass="d1" imgStyle={{ background: 'linear-gradient(135deg,#1c1917,#1a1a2e,#0d0d2b)' }} emoji="🪙" badge="Developer" badgeClass="dev" difficulty={{ className: 'intermediate', label: '⚡ Intermediate' }} title="Securing JWTs: What Most Tutorials Get Wrong" desc={'Algorithm confusion, "none" attacks, insecure storage — the JWT pitfalls that silently break your auth layer.'} meta="May 8, 2026 · 6 min read" readMoreClass="dev" />
-          </div>
-          <div className="blog-grid second-row">
-            <BlogCard imgClass="d2" imgStyle={{ background: 'linear-gradient(135deg,#0a2540,#1a3a5c,#0f2d44)' }} emoji="📋" badge="Developer" badgeClass="dev" difficulty={{ className: 'advanced', label: '🔥 Advanced' }} title="OWASP Top 10 Explained with Code Examples" desc="Every item on the OWASP list broken down with vulnerable code snippets and secure alternatives side-by-side." meta="May 3, 2026 · 12 min read" readMoreClass="dev" />
-            <BlogCard imgClass="d3" imgStyle={{ background: 'linear-gradient(135deg,#052e16,#064e3b,#1a3a2a)' }} emoji="🔐" badge="Developer" badgeClass="dev" difficulty={{ className: 'beginner', label: '✅ Beginner' }} title="How to Set Up HTTPS the Right Way" desc="SSL/TLS configuration, HSTS headers, certificate pinning — a complete HTTPS checklist for your web app." meta="Apr 28, 2026 · 5 min read" readMoreClass="dev" />
-          </div>
-        </div>
-
-        <div className={`blog-panel ${activeTab === 'biz' ? 'active' : ''}`} id="panel-biz">
-          <div className="blog-grid">
-            <BlogCard imgClass="b1" emoji="📜" badge="Business" badgeClass="biz" title="GDPR & Cybersecurity: What Your Business Must Know" desc="Data protection compliance isn't optional. Here's what GDPR requires from your security posture in 2026." meta="May 18, 2026 · 8 min read" readMoreClass="biz" />
-            <BlogCard imgClass="b2" emoji="🚨" badge="Business" badgeClass="biz" title="Incident Response Plan: A Step-by-Step Template" desc="When a breach happens, every minute counts. Build a response plan before you need one with this ready-to-use template." meta="May 11, 2026 · 10 min read" readMoreClass="biz" />
-            <BlogCard imgClass="b3" emoji="🧑‍💼" badge="Business" badgeClass="biz" title="Employee Security Training: Why It's Your Strongest Defense" desc="91% of breaches start with a phishing email. Here's how to build a security-aware culture in your organization." meta="May 4, 2026 · 6 min read" readMoreClass="biz" />
-          </div>
-        </div>
-      </section>
+      <LandingBlogSection />
 
       <section className="how">
         <div className="section-title">How CyberSafe Works</div>

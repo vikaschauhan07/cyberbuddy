@@ -1,15 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useParams, useNavigate } from 'react-router-dom'
-import { useDispatch, useSelector } from 'react-redux'
 import PageLayout from '../components/layout/PageLayout'
-import { GUIDES, LEVEL_META, getGuideBySlug, getRelatedGuides } from '../data/guides'
-import { deleteGuide, selectUserGuideBySlug, selectUserGuides } from '../store/guidesSlice'
+import { LEVEL_META, getRelatedGuides } from '../data/guides'
+import { fetchGuideBySlug, fetchGuides } from '../api/guide'
 
 const STORAGE_KEY = 'cs:completed-guides'
 
-/* ---------------------------------------------------------------
-   Content-block renderer (mirrors BlogPost so guides feel familiar)
-   --------------------------------------------------------------- */
 function Block({ block }) {
   switch (block.type) {
     case 'p':  return <p>{block.text}</p>
@@ -34,9 +30,6 @@ function Block({ block }) {
   }
 }
 
-/* ---------------------------------------------------------------
-   localStorage helpers for "mark as complete"
-   --------------------------------------------------------------- */
 function readCompleted() {
   if (typeof window === 'undefined') return []
   try {
@@ -45,36 +38,61 @@ function readCompleted() {
     return []
   }
 }
+
 function writeCompleted(list) {
   if (typeof window === 'undefined') return
   try { window.localStorage.setItem(STORAGE_KEY, JSON.stringify(list)) } catch { /* noop */ }
 }
 
-/* =============================================================== */
-/*  PAGE                                                            */
-/* =============================================================== */
-
 export default function GuideView() {
   const { slug } = useParams()
-  const navigate = useNavigate()
-  const dispatch = useDispatch()
-  const userGuide = useSelector(selectUserGuideBySlug(slug))
-  const userGuides = useSelector(selectUserGuides)
-  const guide = useMemo(() => userGuide || getGuideBySlug(slug), [userGuide, slug])
+  return <GuideViewContent key={slug} slug={slug} />
+}
 
+function GuideViewContent({ slug }) {
+  const navigate = useNavigate()
+  const [guide, setGuide] = useState(null)
+  const [allGuides, setAllGuides] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
   const [activeStep, setActiveStep] = useState(0)
   const [completed, setCompleted] = useState(() => readCompleted())
-  const [prevSlug, setPrevSlug] = useState(slug)
-  const isCompleted = guide ? completed.includes(guide.slug) : false
   const articleRef = useRef(null)
 
-  /* Reset activeStep when slug changes (React-recommended in-render pattern) */
-  if (slug !== prevSlug) {
-    setPrevSlug(slug)
-    setActiveStep(0)
-  }
+  useEffect(() => {
+    let cancelled = false
 
-  /* keep activeStep in sync with scroll */
+    Promise.all([
+      fetchGuideBySlug(slug),
+      fetchGuides().catch(() => []),
+    ])
+      .then(([detail, list]) => {
+        if (cancelled) return
+        setGuide(detail)
+        setAllGuides(Array.isArray(list) ? list : [])
+        setError('')
+      })
+      .catch((err) => {
+        if (cancelled) return
+        setGuide(null)
+        setAllGuides([])
+        if (err.status === 404) {
+          setError('This guide does not exist or has been removed.')
+        } else {
+          setError(err.message || 'Failed to load this guide. Is the backend running?')
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [slug])
+
+  const isCompleted = guide ? completed.includes(guide.slug) : false
+
   useEffect(() => {
     if (!guide) return
     const root = articleRef.current
@@ -98,21 +116,24 @@ export default function GuideView() {
     return () => obs.disconnect()
   }, [guide])
 
-  /* scroll to top on slug change */
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: 'instant' })
   }, [slug])
 
-  /* Related — keep this hook BEFORE the early return to satisfy rules of hooks */
   const related = useMemo(() => {
     if (!guide) return []
-    if (guide.isUserCreated) {
-      const others = userGuides.filter((g) => g.slug !== guide.slug).slice(0, 2)
-      const staticPicks = GUIDES.slice(0, 3 - others.length)
-      return [...others, ...staticPicks]
-    }
-    return getRelatedGuides(guide.slug)
-  }, [guide, userGuides])
+    return getRelatedGuides(guide, allGuides)
+  }, [guide, allGuides])
+
+  if (loading) {
+    return (
+      <PageLayout>
+        <main className="page-body" style={{ textAlign: 'center', padding: '120px 24px' }}>
+          <p style={{ color: 'var(--muted)' }}>Loading guide…</p>
+        </main>
+      </PageLayout>
+    )
+  }
 
   if (!guide) {
     return (
@@ -120,7 +141,7 @@ export default function GuideView() {
         <main className="page-body" style={{ textAlign: 'center', padding: '120px 24px' }}>
           <h1 style={{ marginBottom: 12 }}>Guide not found</h1>
           <p style={{ color: 'var(--muted)', marginBottom: 24 }}>
-            The guide you&apos;re looking for doesn&apos;t exist or has been moved.
+            {error || 'The guide you\'re looking for doesn\'t exist or has been moved.'}
           </p>
           <Link to="/guides" className="btn-submit">← Back to all guides</Link>
         </main>
@@ -139,32 +160,25 @@ export default function GuideView() {
     writeCompleted(next)
   }
 
-  function handleDelete() {
-    if (!guide.isUserCreated) return
-    if (!window.confirm(`Delete "${guide.title}"? This can't be undone.`)) return
-    dispatch(deleteGuide(guide.slug))
-    navigate('/guides')
-  }
-
   function jumpToStep(idx) {
     const el = articleRef.current?.querySelector(`#step-${idx + 1}`)
     if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }
 
-  const publishedDate = new Date(guide.publishedAt).toLocaleDateString(undefined, {
-    year: 'numeric', month: 'short', day: 'numeric',
-  })
+  const publishedDate = guide.publishedAt
+    ? new Date(guide.publishedAt).toLocaleDateString(undefined, {
+        year: 'numeric', month: 'short', day: 'numeric',
+      })
+    : 'Recently'
 
   return (
     <PageLayout>
-      {/* ===== BREADCRUMB ===== */}
       <div className="guide-breadcrumb">
         <Link to="/guides">← All guides</Link>
         <span className="bc-sep">·</span>
         <span className="bc-current">{guide.tag}</span>
       </div>
 
-      {/* ===== HERO ===== */}
       <header className={`guide-hero guide-cover-${guide.cover}`}>
         <div className="guide-hero-inner">
           <div className="guide-hero-pills">
@@ -189,9 +203,7 @@ export default function GuideView() {
         </div>
       </header>
 
-      {/* ===== BODY ===== */}
       <main className="guide-shell">
-        {/* ─── Sticky sidebar ─── */}
         <aside className="guide-sidebar">
           <div className="guide-progress-card">
             <div className="guide-progress-head">
@@ -227,22 +239,9 @@ export default function GuideView() {
           >
             {isCompleted ? '✓ Completed' : 'Mark as complete'}
           </button>
-
-          {guide.isUserCreated && (
-            <button
-              type="button"
-              className="guide-delete-btn"
-              onClick={handleDelete}
-              title="Delete this guide"
-            >
-              🗑 Delete guide
-            </button>
-          )}
         </aside>
 
-        {/* ─── Article ─── */}
         <article className="guide-article" ref={articleRef}>
-          {/* What you'll learn + Prerequisites */}
           <div className="guide-info-grid">
             <section className="guide-info-card">
               <header><span aria-hidden>🎯</span><h2>What you&apos;ll learn</h2></header>
@@ -258,7 +257,6 @@ export default function GuideView() {
             </section>
           </div>
 
-          {/* Steps timeline */}
           <div className="guide-steps">
             {guide.steps.map((step, i) => (
               <section key={i} id={`step-${i + 1}`} className="guide-step">
@@ -276,7 +274,6 @@ export default function GuideView() {
             ))}
           </div>
 
-          {/* Completion banner */}
           <section className={`guide-finish ${isCompleted ? 'done' : ''}`}>
             <div className="guide-finish-emoji" aria-hidden>{isCompleted ? '🏆' : '🎉'}</div>
             <h2>{isCompleted ? "You've already completed this guide" : 'You made it to the end!'}</h2>
@@ -293,7 +290,6 @@ export default function GuideView() {
             </div>
           </section>
 
-          {/* Related guides */}
           {related.length > 0 && (
             <section className="guide-related">
               <header>
@@ -315,19 +311,17 @@ export default function GuideView() {
             </section>
           )}
 
-          {/* Prev/Next inside the static guide list (skip for user-created guides) */}
-          {!guide.isUserCreated && <GuideNav currentSlug={guide.slug} navigate={navigate} />}
+          <GuideNav currentSlug={guide.slug} guides={allGuides} navigate={navigate} />
         </article>
       </main>
     </PageLayout>
   )
 }
 
-/* Adjacent guides (within the same level if possible) */
-function GuideNav({ currentSlug, navigate }) {
-  const idx = GUIDES.findIndex((g) => g.slug === currentSlug)
-  const prev = idx > 0 ? GUIDES[idx - 1] : null
-  const next = idx < GUIDES.length - 1 ? GUIDES[idx + 1] : null
+function GuideNav({ currentSlug, guides, navigate }) {
+  const idx = guides.findIndex((g) => g.slug === currentSlug)
+  const prev = idx > 0 ? guides[idx - 1] : null
+  const next = idx >= 0 && idx < guides.length - 1 ? guides[idx + 1] : null
   if (!prev && !next) return null
 
   return (

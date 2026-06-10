@@ -1,9 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
-import { useDispatch, useSelector } from 'react-redux'
+import { Link, useParams } from 'react-router-dom'
 import PageLayout from '../../components/layout/PageLayout'
-import { BLOG_POSTS, CATEGORY_META, getRelatedPosts } from '../../data/blogPosts'
-import { deletePost, selectUserPostBySlug, selectUserPosts } from '../../store/blogSlice'
+import { CATEGORY_META, getRelatedPosts } from '../../data/blogPosts'
+import { fetchBlogPostBySlug, fetchBlogPosts } from '../../api/blog'
 import './blog.css'
 
 function slugify(text) {
@@ -64,34 +63,53 @@ function Block({ block, idForHeading }) {
 
 export default function BlogPost() {
   const { slug } = useParams()
-  const navigate = useNavigate()
-  const dispatch = useDispatch()
-  const userPost = useSelector(selectUserPostBySlug(slug))
-  const userPosts = useSelector(selectUserPosts)
+  return <BlogPostView key={slug} slug={slug} />
+}
 
-  const post = useMemo(() => {
-    if (userPost) return userPost
-    return BLOG_POSTS.find((p) => p.slug === slug)
-  }, [userPost, slug])
+function BlogPostView({ slug }) {
+  const [post, setPost] = useState(null)
+  const [allPosts, setAllPosts] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    let cancelled = false
+
+    Promise.all([
+      fetchBlogPostBySlug(slug),
+      fetchBlogPosts().catch(() => []),
+    ])
+      .then(([detail, list]) => {
+        if (cancelled) return
+        setPost(detail)
+        setAllPosts(Array.isArray(list) ? list : [])
+        setError('')
+      })
+      .catch((err) => {
+        if (cancelled) return
+        setPost(null)
+        setAllPosts([])
+        if (err.status === 404) {
+          setError('This article does not exist or has been removed.')
+        } else {
+          setError(err.message || 'Failed to load this article. Is the backend running?')
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [slug])
 
   const related = useMemo(() => {
     if (!post) return []
-    if (post.isUserCreated) {
-      const merged = [...userPosts, ...BLOG_POSTS]
-      return merged.filter((p) => p.slug !== post.slug && p.category === post.category).slice(0, 3)
-    }
-    return getRelatedPosts(post)
-  }, [post, userPosts])
+    return getRelatedPosts(post, allPosts)
+  }, [post, allPosts])
 
   const [activeId, setActiveId] = useState(null)
-
-  function handleDelete() {
-    if (!post?.isUserCreated) return
-    if (window.confirm(`Delete "${post.title}"? This cannot be undone.`)) {
-      dispatch(deletePost(post.slug))
-      navigate('/blog')
-    }
-  }
 
   const tocItems = useMemo(() => {
     if (!post) return []
@@ -125,12 +143,22 @@ export default function BlogPost() {
     return () => observer.disconnect()
   }, [post, tocItems])
 
+  if (loading) {
+    return (
+      <PageLayout>
+        <main className="page-body">
+          <p>Loading article…</p>
+        </main>
+      </PageLayout>
+    )
+  }
+
   if (!post) {
     return (
       <PageLayout>
         <div className="not-found">
           <h1>Post not found</h1>
-          <p>The article you were looking for does not exist or has been moved.</p>
+          <p>{error || 'The article you were looking for does not exist or has been moved.'}</p>
           <Link to="/blog" className="btn-submit" style={{ display: 'inline-block', textDecoration: 'none' }}>
             Back to Blog
           </Link>
@@ -144,20 +172,9 @@ export default function BlogPost() {
   return (
     <PageLayout fillViewport noFooter>
       <div className="post-page post-page-split">
-        {/* TOC SIDEBAR — scrolls independently */}
         <aside className="post-toc post-toc-scroll">
           <div className="post-toc-inner">
             <Link to="/blog" className="post-back">← All articles</Link>
-            {post.isUserCreated && (
-              <button
-                type="button"
-                onClick={handleDelete}
-                className="post-delete-btn"
-                title="Delete this post"
-              >
-                🗑 Delete post
-              </button>
-            )}
             {tocItems.length > 0 && (
               <>
                 <h4>On this page</h4>
@@ -191,7 +208,6 @@ export default function BlogPost() {
           </div>
         </aside>
 
-        {/* ARTICLE — scrolls independently in its own pane */}
         <article className="post-article post-article-scroll">
           <div className="post-article-inner">
           <div className={`post-hero ${post.category}`} aria-hidden>
